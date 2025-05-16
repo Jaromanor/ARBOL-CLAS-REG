@@ -1,0 +1,5 @@
+"0","library(caret)"
+"0","set.seed(123)"
+"0","indices<-createDataPartition(kyphosis$Kyphosis,p=0.7,list = FALSE)"
+"0","train<-kyphosis[indices,]"
+"0","test<-kyphosis[-indices,]"

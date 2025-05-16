@@ -1,0 +1,1 @@
+"0","pred_test_2 <- predict(arbol_ini, newdata = test, type = ""class"")"

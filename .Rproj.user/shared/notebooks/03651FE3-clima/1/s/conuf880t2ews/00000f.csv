@@ -1,0 +1,2 @@
+"0","library(rpart.plot)"
+"0","rpart.plot(arbol_ini, type = 3, extra = 1)"

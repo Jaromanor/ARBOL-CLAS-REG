@@ -1,0 +1,2 @@
+"0","arbol_podado <- prune(arbol_ini,"
+"0","                      cp = arbol_ini$cptable[which.min(arbol_ini$cptable[, ""xerror""]), ""CP""])"
