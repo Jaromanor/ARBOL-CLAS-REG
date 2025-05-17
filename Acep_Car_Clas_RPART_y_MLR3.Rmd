@@ -1,0 +1,227 @@
+---
+title: "Aceptación_Carros"
+author: "JARO"
+date: "2025-05-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. CONTEXTO
+
+Se desarrollará un ejercicio con un enfoque explicativo (análisis estadístico, interpretación estructural del modelo) utilizando rpart y posteriormente un enfoque predictivo utilizando mlr3.
+
+## 1.1 El data set: car
+
+Este data set muestra la preferencia de los carros basado en algunas características. La variable aceptabilidad (targed) presenta 4 valoraciones.
+
+## 1.2 Carga Data Set y adecuaciones.
+
+
+```{r}
+#Las observaciones
+download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/car/car.data", "car.data")
+```
+
+```{r}
+#Los nombres de las variables
+download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/car/car.names", "car.names")
+```
+Como habrás notado, nuestros datos tienen una extensión de archivo no convencional: .data. En R no existe una función específica para leer archivos con esta extensión, similar a red.csv() o read.dat(), las cuales nos facilitan tarea de importar archivos de formatos específicos. Lo mismmo pasa con el archivo con su descripción, que tiene la extensión .name.
+
+Necesitamos explorar estos archivos para saber cómo podemos leerlos. Para estos casos, usamos la función readLines(), que lee archivos, línea por línea, independientemente de su extensión o formato. con el argumento n = 10 indicamos que sólo deseamos leer las primeras diez líneas de cada archivo.
+
+Empezamos con los datos.
+
+```{r}
+readLines("car.data",n=10)
+```
+El archivo de datos parece ser una tabla de datos rectangular, con columnas separadas por comas. Entonces leer este archivo es fácil. El único inconveniente que tenemos es que nos faltan los nombres de cada columna.
+
+Podemos usar read_table() para leer este archivo. Esta función está diseñada para leer tablas de datos, es decir, con estructura rectangular (renglones y columnas).
+
+Para asegurarnos que los datos serán leídos de manera correcta, especificamos que el separador de las columnas es una coma (sep = ",") y que no tenemos nombres de columna en nuestro archivo (header = FALSE). Asignamos el resultado al objeto carros.
+
+```{r}
+carros<-read.table("car.data",sep = ",")
+```
+
+```{r}
+names<-c("preciocompra","preciomantenimiento","#puertas",
+         "#personas","tamañomaletero","seguridad","aceptabilidad")
+```
+
+```{r}
+names(carros)<-names
+```
+
+
+```{r}
+str(carros)
+```
+Establecemos como factores. Pero hacerlo automatizado para poder reutilizar el script
+
+```{r}
+library(dplyr)
+carros<-carros%>%
+  mutate(across(where(is.character),as.factor))
+```
+
+
+# 2. Enfoque Explicativo
+
+Inicialmente revisamos el balanceo:
+
+```{r}
+prop.table(table(carros$aceptabilidad))
+```
+
+Las opiniones mejor valoradas están desbalanceadas, sin embargo, continuamos el ejercicio.
+
+## 2.1 Set: Entrenamiento y Prueba
+
+```{r}
+library(caret)
+indices<-createDataPartition(carros$aceptabilidad,p=0.7,list = FALSE)
+train<-carros[indices,]
+test<-carros[-indices,]
+```
+
+Verificamos que todas las categorías de nuestra variable target en el set de entrenamiento estén presentes:
+
+```{r}
+prop.table(table(train$aceptabilidad))
+```
+
+## 2.2 Entrenamiento del modelo
+
+```{r}
+library(rpart)
+car_ini<-rpart(aceptabilidad~.,data=train,method = "class")
+```
+
+## 2.3 Visualizar Árbol
+
+```{r}
+library(rpart.plot)
+rpart.plot(car_ini, type = 3, extra = 104)
+```
+
+## 2.4 Evaluar complejidad del árbol
+
+
+```{r}
+printcp(car_ini)
+```
+
+El algoritmo eliminó la variable: # Puertas
+
+Root node error: 364/1211 toma unacc como clase mayoritaria
+
+Prácticamente me indica que no haga poda ya que el xerror de validación cruzada menor está en el cp inferior o lo que es lo mismo en el último nivel del árbol estimado.
+
+## 2.5 Predicción
+
+```{r}
+pred_test <- predict(car_ini, newdata = test, type = "class")
+```
+
+## 2.6 Evaluación
+
+```{r}
+table(Predicted = pred_test, Actual = test$aceptabilidad)
+```
+
+
+# 3. Enfoque predicitivo: MLR3
+
+```{r}
+library(mlr3)
+library(mlr3learners)       # para incluir learners como rpart
+library(mlr3verse)          # entorno completo de mlr3
+library(mlr3viz)            # visualización opcional
+library(mlr3measures)       # métricas extra
+library(rpart.plot)         # para visualizar el árbol
+library(rpart)
+library(mlr3fselect)
+```
+
+## 3.1 Definimos Task
+
+```{r}
+task<-TaskClassif$new(
+  id="carros",
+  backend = carros,
+  target = "aceptabilidad"
+)
+```
+
+
+
+## 3.2 Partición DATA
+
+```{r}
+set.seed(123)
+split<-partition(task,ratio = 0.7)
+```
+
+
+
+## 3.3 Selección de Variables - Entrenamiento del Modelo
+
+Vamos a construir un learner que permita hacer selección de variables tipo envoltura sin ajuste de hiperparámetros.
+
+```{r}
+#Definimos el learner
+learner<-lrn("classif.rpart",predict_type="response")
+```
+
+Configuramos wrapper:
+
+¿FSelectInstanceSingleCrit o AutoFSelector$new?
+
+La primera opción es más laboriosa porque:
+
+- Le indico qué variables probar, cómo evaluar, cuándo parar.
+- Luego yo mismo inicio la selección.
+- Yo hago cada paso por separado (más control, más trabajo).
+
+```{r}
+# Diseño de evaluación para cada subconjunto de variables
+resampling<-rsmp("cv",folds=5)
+
+# Métrica a optimizar (puedes cambiar por sensitivity si tu prioridad es captar "yes")
+measure <- msr("classif.sensitivity")
+
+# Selector: búsqueda secuencial hacia adelante o aleatoria random_search
+fselector <- fs("sequential")
+
+# Criterio de parada: 20 combinaciones
+terminator <- trm("evals", n_evals = 20)
+
+# Términos de la selección de variables
+library(mlr3fselect)
+instance <- fselect(
+  task = task,
+  learner = learner,
+  resampling = resampling,
+  measure = measure,
+  terminator = terminator,
+  fselector = fselector
+)
+```
+
+
+## 3.4 Ajusted de Hiperparámetros
+
+## 3.5 Evaluación
+
+
+
+
+
+
+
+
