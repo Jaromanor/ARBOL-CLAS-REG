@@ -134,7 +134,6 @@ pred_test <- predict(car_ini, newdata = test, type = "class")
 table(Predicted = pred_test, Actual = test$aceptabilidad)
 ```
 
-
 # 3. Enfoque predicitivo: MLR3
 
 ```{r}
@@ -148,76 +147,79 @@ library(rpart)
 library(mlr3fselect)
 ```
 
-## 3.1 Definimos Task
+## 3.1 Creación de Tarea
+
+Creamos la tarea de clasificación o el task
 
 ```{r}
-task<-TaskClassif$new(
-  id="carros",
-  backend = carros,
-  target = "aceptabilidad"
+task_ini<-TaskClassif$new(
+  id="car",
+  backend=carros,
+  target="aceptabilidad"
 )
+task_ini
 ```
 
+## 3.2 Partición set de datos: Train - Test
 
-
-## 3.2 Partición DATA
+Particionamos el data SET: 80% entrenamiento y 20% prueba. Cada set tendrá su propio Task para evitar intervenir el original.
 
 ```{r}
-set.seed(123)
-split<-partition(task,ratio = 0.7)
+set.seed(1234)
+rsmp_car<-rsmp("holdout",ratio=0.8)
 ```
 
-
-
-## 3.3 Selección de Variables - Entrenamiento del Modelo
-
-Vamos a construir un learner que permita hacer selección de variables tipo envoltura sin ajuste de hiperparámetros.
+Para que el reparto sea estratificado, es necesario indicar en el task qué columna o columnas se emplea como stratum. Solo para variables cualitativas.
 
 ```{r}
-#Definimos el learner
-learner<-lrn("classif.rpart",predict_type="response")
+task_ini$col_roles$stratum<-"aceptabilidad"
 ```
 
-Configuramos wrapper:
-
-¿FSelectInstanceSingleCrit o AutoFSelector$new?
-
-La primera opción es más laboriosa porque:
-
-- Le indico qué variables probar, cómo evaluar, cuándo parar.
-- Luego yo mismo inicio la selección.
-- Yo hago cada paso por separado (más control, más trabajo).
+Tomo el objeto “task_datos” (mi tarea de machine learning que contiene mi data original). Entonces $instantiate toma ese objeto y le aplica el método rsmp_holdout. Esto genera los índices de data train y test.
 
 ```{r}
-# Diseño de evaluación para cada subconjunto de variables
-resampling<-rsmp("cv",folds=5)
+rsmp_car$instantiate(task = task_ini)
+```
 
-# Métrica a optimizar (puedes cambiar por sensitivity si tu prioridad es captar "yes")
-measure <- msr("classif.sensitivity")
+Obtengo los índices
 
-# Selector: búsqueda secuencial hacia adelante o aleatoria random_search
-fselector <- fs("sequential")
+```{r}
+id_train<-rsmp_car$train_set(i=1)
+id_test<-rsmp_car$test_set(i=1)
+```
 
-# Criterio de parada: 20 combinaciones
-terminator <- trm("evals", n_evals = 20)
+Crea una copia del objeto task_datos y sobre esa copia, filtra para quedarte solo con las observaciones de entrenamiento, usando los índices id_train. Guarda el resultado en task_train.
 
-# Términos de la selección de variables
-library(mlr3fselect)
-instance <- fselect(
-  task = task,
-  learner = learner,
-  resampling = resampling,
-  measure = measure,
-  terminator = terminator,
-  fselector = fselector
-)
+```{r}
+task_train<-task_ini$clone()$filter(id_train)
+task_test<-task_ini$clone()$filter(id_test)
 ```
 
 
-## 3.4 Ajusted de Hiperparámetros
+## 3.3 Preprocesamiento
+El preprocesado engloba todas aquellas transformaciones realizadas sobre los datos con el objetivo que puedan ser interpretados por el algoritmo de machine learning lo más eficientemente posible.
 
-## 3.5 Evaluación
+Aca se van a escalar y recodificar las variables cualitativas a dummis. Además para no alterar los task originales se crearan task de preprocesamiento.
 
+Creamos la tarea de preprocesamiento o nuestro pipeline:
+
+```{r}
+preproces_pipeline<-po("scale",param_vals=list(center=TRUE,scale=TRUE))%>>%
+  po("encode",param_vals=list(method="one-hot"))
+```
+
+```{r}
+preproces_pipeline$train(task_train)
+```
+
+Ejecutamos el pipeline sobre las tareas de entrenamiento y prueba, pero creando nuevos objetos:
+
+```{r}
+task_train_pre<-preproces_pipeline$predict(task_train)[[1]]$clone()
+task_test_pre<-preproces_pipeline$predict(task_train)[[1]]$clone()
+```
+¿Por qué [[1]]?
+El pipeline devuelve una lista de resultados (list(task_procesado)) porque los PipeOp pueden tener múltiples salidas (e.g., bifurcaciones).
 
 
 
